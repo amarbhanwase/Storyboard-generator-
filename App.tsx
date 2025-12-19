@@ -1,8 +1,8 @@
 
-import React, { useState, useCallback, useEffect } from 'react';
-import { analyzeStory, generateSceneImage, generateSceneVideo } from './geminiService';
-import { Scene, Storyboard, AppState, GenerationMode } from './types';
-import SceneCard from './components/SceneCard';
+import React, { useState } from 'react';
+import { analyzeStory, generateSceneImage, generateSceneVideo } from './geminiService.ts';
+import { Scene, Storyboard, AppState, GenerationMode } from './types.ts';
+import SceneCard from './SceneCard.tsx';
 import { Camera, Film, Send, RefreshCw, Layers, Layout, ChevronLeft } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -23,8 +23,11 @@ const App: React.FC = () => {
       setStoryboard(result);
       setAppState(AppState.STORYBOARDING);
       
-      // Start sequential generation of media
-      processScenes(result.scenes);
+      // Process scenes one by one to avoid race conditions and provide feedback
+      for (let i = 0; i < result.scenes.length; i++) {
+        await triggerSceneGeneration(i, result, mode);
+      }
+      setAppState(AppState.VIEWING);
     } catch (err: any) {
       console.error(err);
       setError('Failed to analyze the story. Please try again.');
@@ -32,63 +35,47 @@ const App: React.FC = () => {
     }
   };
 
-  const processScenes = async (scenes: Scene[]) => {
-    for (let i = 0; i < scenes.length; i++) {
-      await generateMediaForScene(i);
-    }
-    setAppState(AppState.VIEWING);
-  };
-
-  const generateMediaForScene = async (index: number) => {
+  const triggerSceneGeneration = async (index: number, currentStoryboard: Storyboard, currentMode: GenerationMode) => {
+    // 1. Set status to generating
     setStoryboard(prev => {
       if (!prev) return null;
       const newScenes = [...prev.scenes];
-      newScenes[index].status = 'generating';
+      newScenes[index] = { ...newScenes[index], status: 'generating' };
       return { ...prev, scenes: newScenes };
     });
 
     try {
-      // Create a local reference to ensure we have the most up-to-date scene data
-      setStoryboard(currentStoryboard => {
-        if (!currentStoryboard) return null;
-        const scene = currentStoryboard.scenes[index];
-        
-        // Trigger the actual generation outside of the state update
-        (async () => {
-          try {
-            const mediaUrl = mode === 'image' 
-              ? await generateSceneImage(scene.visualPrompt)
-              : await generateSceneVideo(scene.visualPrompt);
+      const scene = currentStoryboard.scenes[index];
+      const mediaUrl = currentMode === 'image' 
+        ? await generateSceneImage(scene.visualPrompt)
+        : await generateSceneVideo(scene.visualPrompt);
 
-            setStoryboard(next => {
-              if (!next) return null;
-              const updatedScenes = [...next.scenes];
-              updatedScenes[index] = {
-                ...updatedScenes[index],
-                mediaUrl,
-                status: 'completed'
-              };
-              return { ...next, scenes: updatedScenes };
-            });
-          } catch (err) {
-            console.error(err);
-            setStoryboard(next => {
-              if (!next) return null;
-              const updatedScenes = [...next.scenes];
-              updatedScenes[index] = {
-                ...updatedScenes[index],
-                status: 'failed'
-              };
-              return { ...next, scenes: updatedScenes };
-            });
-          }
-        })();
-
-        return currentStoryboard;
+      // 2. Set status to completed with the resulting URL
+      setStoryboard(prev => {
+        if (!prev) return null;
+        const newScenes = [...prev.scenes];
+        newScenes[index] = {
+          ...newScenes[index],
+          mediaUrl,
+          status: 'completed'
+        };
+        return { ...prev, scenes: newScenes };
       });
-    } catch (err: any) {
-      console.error(err);
+    } catch (err) {
+      console.error('Generation failed for scene', index, err);
+      // 3. Set status to failed so user can retry
+      setStoryboard(prev => {
+        if (!prev) return null;
+        const newScenes = [...prev.scenes];
+        newScenes[index] = { ...newScenes[index], status: 'failed' };
+        return { ...prev, scenes: newScenes };
+      });
     }
+  };
+
+  const handleRegenerateScene = async (index: number) => {
+    if (!storyboard) return;
+    await triggerSceneGeneration(index, storyboard, mode);
   };
 
   const handleReset = () => {
@@ -98,7 +85,7 @@ const App: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col">
+    <div className="min-h-screen flex flex-col bg-[#09090b] text-[#fafafa]">
       {/* Header */}
       <header className="border-b border-zinc-800 bg-zinc-900/50 backdrop-blur-md sticky top-0 z-50">
         <div className="container mx-auto px-4 h-16 flex items-center justify-between">
@@ -134,7 +121,7 @@ const App: React.FC = () => {
                 value={storyText}
                 onChange={(e) => setStoryText(e.target.value)}
                 placeholder="Once upon a time in a cyberpunk metropolis, a lone detective discovers a forgotten memory chip..."
-                className="w-full h-48 bg-transparent border-none focus:ring-0 text-lg resize-none placeholder:text-zinc-600"
+                className="w-full h-48 bg-transparent border-none focus:ring-0 text-lg resize-none placeholder:text-zinc-600 outline-none"
               />
               
               <div className="flex flex-col sm:flex-row items-center justify-between gap-4 pt-6 border-t border-zinc-800 mt-4">
@@ -157,14 +144,14 @@ const App: React.FC = () => {
 
                 <button
                   onClick={handleStartGeneration}
-                  disabled={!storyText.trim()}
+                  disabled={!storyText.trim() || appState !== AppState.IDLE}
                   className="w-full sm:w-auto flex items-center justify-center gap-2 px-8 py-3 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-xl transition-all shadow-lg shadow-indigo-500/20"
                 >
                   <Send className="w-4 h-4" />
                   Generate Storyboard
                 </button>
               </div>
-              {error && <p className="mt-4 text-red-500 text-sm text-center">{error}</p>}
+              {error && <p className="mt-4 text-red-500 text-sm text-center font-medium">{error}</p>}
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-3 gap-6 pt-12">
@@ -195,7 +182,7 @@ const App: React.FC = () => {
                 <SceneCard 
                   key={scene.id} 
                   scene={scene} 
-                  onRegenerate={() => generateMediaForScene(idx)} 
+                  onRegenerate={() => handleRegenerateScene(idx)} 
                 />
               ))}
             </div>

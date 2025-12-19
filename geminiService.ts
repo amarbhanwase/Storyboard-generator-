@@ -1,6 +1,6 @@
 
-import { GoogleGenAI, Type, GenerateContentResponse } from "@google/genai";
-import { Scene, GenerationMode } from './types';
+import { GoogleGenAI, Type } from "@google/genai";
+import { Scene, GenerationMode } from './types.ts';
 
 export const analyzeStory = async (storyText: string, mode: GenerationMode): Promise<{ title: string; scenes: Scene[] }> => {
   const ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
@@ -88,7 +88,6 @@ export const generateSceneImage = async (prompt: string): Promise<string> => {
 };
 
 export const generateSceneVideo = async (prompt: string): Promise<string> => {
-  // Check for selected API key (mandatory for Veo)
   const hasKey = await (window as any).aistudio.hasSelectedApiKey();
   if (!hasKey) {
     await (window as any).aistudio.openSelectKey();
