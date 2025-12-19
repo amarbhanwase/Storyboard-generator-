@@ -1,0 +1,8 @@
+{
+  "name": "CineBoard - AI Storyboard Architect",
+  "description": "A high-end cinematic storyboard generator that transforms raw stories into detailed scene-by-scene visual sequences using Gemini's multimodal power.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone"
+  ]
+}
